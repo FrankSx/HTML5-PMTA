@@ -1,0 +1,8 @@
+<!DOCTYPE html>
+<html>
+<head><title>Style CDATA Confusion</title></head>
+<body>
+<h3>Comment/CDATA State Confusion in &lt;style&gt;</h3>
+<style><![CDATA[<!--</style><script>alert('STYLE_CDATA: Style block became script container')</script>-->]]></style>
+</body>
+</html>

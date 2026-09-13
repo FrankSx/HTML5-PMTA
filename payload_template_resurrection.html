@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><title>Template Resurrection</title></head>
+<body>
+<h3>Template Content Resurrection</h3>
+<p>Deferred execution via template.content cloneNode.</p>
+<template id="t1"><svg><foreignObject><template id="t2"><xmp><script>alert('TEMPLATE RESURRECTION: Script executed from cloned DocumentFragment')</script></xmp></template></foreignObject></svg></template>
+<div id="inject"></div>
+<script>
+setTimeout(()=>{
+  const t = document.getElementById("t1");
+  if(t && t.content){
+    const c = t.content.cloneNode(true);
+    document.getElementById("inject").appendChild(c);
+  }
+}, 500);
+</script>
+</body>
+</html>

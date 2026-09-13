@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head><title>Namespace Prefix Rebinding</title></head>
+<body>
+<h3>Namespace Prefix Rebinding</h3>
+<x:body xmlns:x="http://www.w3.org/1999/xhtml">
+  <x:math xmlns:x="http://www.w3.org/1998/Math/MathML">
+    <x:mtext>
+      <x:script>alert('NS_REBIND: Prefix desync executed script')</x:script>
+    </x:mtext>
+  </x:math>
+</x:body>
+</body>
+</html>

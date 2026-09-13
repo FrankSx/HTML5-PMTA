@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><title>Custom Element Upgrade Gadget</title></head>
+<body>
+<h3>Custom Element Upgrade Gadget</h3>
+<x-foo data-x="alert('CE_GADGET: Custom element eval executed')"></x-foo>
+<script>
+customElements.define('x-foo', class extends HTMLElement {
+  connectedCallback() {
+    try { eval(this.getAttribute('data-x')); } catch(e) {}
+  }
+});
+</script>
+</body>
+</html>

